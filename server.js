@@ -58,14 +58,18 @@ app.use("/api/cms", cmsRoutes);
 app.use(notFound);
 app.use(errorHandler);
 
-const PORT = process.env.PORT || 5000;
+const port = process.env.PORT || 3000;
 
-connectDB().then(() => {
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(
-      `[server] Crystal Express API running on port ${PORT} (${process.env.NODE_ENV || "development"})`,
-    );
-  });
+app.listen(port, "0.0.0.0", async () => {
+  console.log(
+    `[server] Crystal Express API running on port ${port} (${process.env.NODE_ENV || "development"})`
+  );
+
+  try {
+    await connectDB();
+  } catch (err) {
+    console.error("[server] Database connection failed:", err.message);
+  }
 });
 
 module.exports = app;
