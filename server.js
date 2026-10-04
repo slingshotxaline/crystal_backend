@@ -5,6 +5,9 @@ const cors = require("cors");
 const helmet = require("helmet");
 const morgan = require("morgan");
 const https = require("https");
+const dns = require("dns").promises;
+const net = require("net");
+
 const mongoSanitize = require("express-mongo-sanitize");
 const xss = require("xss-clean");
 
@@ -21,11 +24,9 @@ const userRoutes = require("./src/routes/userRoutes");
 
 const app = express();
 
-/*
- * ----------------------------------------------------
- * Security & Parsing
- * ----------------------------------------------------
- */
+/* =========================================================
+   SECURITY
+========================================================= */
 
 app.use(helmet());
 
@@ -36,40 +37,46 @@ app.use(
   }),
 );
 
+/* =========================================================
+   BODY PARSING
+========================================================= */
+
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true }));
+
+/* =========================================================
+   SANITIZATION
+========================================================= */
 
 app.use(mongoSanitize());
 app.use(xss());
 
+/* =========================================================
+   LOGGING
+========================================================= */
+
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 
-/*
- * ----------------------------------------------------
- * API Rate Limiter
- * ----------------------------------------------------
- */
+/* =========================================================
+   API RATE LIMITER
+========================================================= */
 
 app.use("/api", apiLimiter);
 
-/*
- * ----------------------------------------------------
- * Root / Health Check
- * ----------------------------------------------------
- */
+/* =========================================================
+   ROOT / HEALTH CHECK
+========================================================= */
 
-// Root route for GoDaddy health check
 app.get("/", (req, res) => {
-  res.json({
+  res.status(200).json({
     success: true,
     service: "crystal-express-api",
     status: "online",
   });
 });
 
-// API health check
 app.get("/api/health", (req, res) => {
-  res.json({
+  res.status(200).json({
     success: true,
     service: "crystal-express-api",
     status: "ok",
@@ -77,32 +84,31 @@ app.get("/api/health", (req, res) => {
   });
 });
 
-/*
- * ----------------------------------------------------
- * API Routes
- * ----------------------------------------------------
- */
+/* =========================================================
+   API ROUTES
+========================================================= */
 
 app.use("/api/auth", authRoutes);
+
 app.use("/api/users", userRoutes);
+
 app.use("/api/quotes", quoteRoutes);
+
 app.use("/api/enquiries", enquiryRoutes);
+
 app.use("/api/cms", cmsRoutes);
 
-/*
- * ----------------------------------------------------
- * Error Handling
- * ----------------------------------------------------
- */
+/* =========================================================
+   404 / ERROR HANDLERS
+========================================================= */
 
 app.use(notFound);
+
 app.use(errorHandler);
 
-/*
- * ----------------------------------------------------
- * GoDaddy Outbound IP Test
- * ----------------------------------------------------
- */
+/* =========================================================
+   GODADDY OUTBOUND IP TEST
+========================================================= */
 
 https
   .get("https://api.ipify.org", (res) => {
@@ -120,24 +126,96 @@ https
     console.error("[network] IP check failed:", err.message);
   });
 
-/*
- * ----------------------------------------------------
- * Start Server
- * ----------------------------------------------------
- */
+/* =========================================================
+   TEMPORARY MONGODB NETWORK DIAGNOSTIC
+========================================================= */
+
+async function testMongoNetwork() {
+  const srvHost = "_mongodb._tcp.cluster0.q5g2xzk.mongodb.net";
+
+  console.log("[mongo-test] Starting MongoDB network diagnostics...");
+
+  console.log("[mongo-test] Resolving SRV:", srvHost);
+
+  try {
+    const records = await dns.resolveSrv(srvHost);
+
+    console.log("[mongo-test] SRV records:", records);
+
+    if (!records || records.length === 0) {
+      console.error("[mongo-test] No SRV records found.");
+
+      return;
+    }
+
+    for (const record of records) {
+      await new Promise((resolve) => {
+        const hostname = record.name.replace(/\.$/, "");
+        const port = record.port;
+
+        console.log(`[mongo-test] Testing TCP: ${hostname}:${port}`);
+
+        const socket = net.createConnection({
+          host: hostname,
+          port: port,
+          timeout: 5000,
+        });
+
+        socket.on("connect", () => {
+          console.log(`[mongo-test] TCP OK: ${hostname}:${port}`);
+
+          socket.destroy();
+          resolve();
+        });
+
+        socket.on("timeout", () => {
+          console.error(`[mongo-test] TCP TIMEOUT: ${hostname}:${port}`);
+
+          socket.destroy();
+          resolve();
+        });
+
+        socket.on("error", (err) => {
+          console.error(
+            `[mongo-test] TCP ERROR: ${hostname}:${port} - ${err.message}`,
+          );
+
+          socket.destroy();
+          resolve();
+        });
+      });
+    }
+
+    console.log("[mongo-test] MongoDB network diagnostics finished.");
+  } catch (err) {
+    console.error("[mongo-test] SRV DNS ERROR:", err.message);
+  }
+}
+
+/* =========================================================
+   SERVER
+========================================================= */
 
 const port = process.env.PORT || 3000;
 
 app.listen(port, "0.0.0.0", async () => {
   console.log(
-    `[server] Crystal Express API running on port ${port} (${process.env.NODE_ENV || "development"})`,
+    `[server] Crystal Express API running on port ${port} (${process.env.NODE_ENV || "production"})`,
   );
 
+  /* Temporary MongoDB network test */
+  testMongoNetwork();
+
+  /* MongoDB connection */
   try {
     await connectDB();
   } catch (err) {
     console.error("[server] Database connection failed:", err.message);
   }
 });
+
+/* =========================================================
+   EXPORT
+========================================================= */
 
 module.exports = app;
