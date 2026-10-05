@@ -14,6 +14,7 @@ const xss = require("xss-clean");
 const connectDB = require("./src/config/db");
 
 const { apiLimiter } = require("./src/middleware/rateLimiter");
+
 const { notFound, errorHandler } = require("./src/middleware/errorHandler");
 
 const quoteRoutes = require("./src/routes/quoteRoutes");
@@ -64,7 +65,7 @@ app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 app.use("/api", apiLimiter);
 
 /* =========================================================
-   ROOT / HEALTH CHECK
+   ROOT ROUTE
 ========================================================= */
 
 app.get("/", (req, res) => {
@@ -74,6 +75,10 @@ app.get("/", (req, res) => {
     status: "online",
   });
 });
+
+/* =========================================================
+   HEALTH ROUTE
+========================================================= */
 
 app.get("/api/health", (req, res) => {
   res.status(200).json({
@@ -110,24 +115,60 @@ app.use(errorHandler);
    GODADDY OUTBOUND IP TEST
 ========================================================= */
 
-https
-  .get("https://api.ipify.org", (res) => {
-    let ip = "";
+function testOutboundIP() {
+  https
+    .get("https://api.ipify.org", (res) => {
+      let ip = "";
 
-    res.on("data", (chunk) => {
-      ip += chunk;
-    });
+      res.on("data", (chunk) => {
+        ip += chunk;
+      });
 
-    res.on("end", () => {
-      console.log("[network] GoDaddy outbound IP:", ip);
+      res.on("end", () => {
+        console.log("[network] GoDaddy outbound IP:", ip);
+      });
+    })
+    .on("error", (err) => {
+      console.error("[network] IP check failed:", err.message);
     });
-  })
-  .on("error", (err) => {
-    console.error("[network] IP check failed:", err.message);
-  });
+}
 
 /* =========================================================
-   TEMPORARY MONGODB NETWORK DIAGNOSTIC
+   GENERAL OUTBOUND TCP TEST
+   Tests whether Node.js can make a normal
+   outbound TCP connection.
+========================================================= */
+
+function testGoogleTCP() {
+  console.log("[tcp-test] Testing outbound TCP to google.com:443...");
+
+  const socket = net.createConnection({
+    host: "google.com",
+    port: 443,
+    timeout: 5000,
+  });
+
+  socket.on("connect", () => {
+    console.log("[tcp-test] google.com:443 -> TCP OK");
+
+    socket.destroy();
+  });
+
+  socket.on("timeout", () => {
+    console.error("[tcp-test] google.com:443 -> TIMEOUT");
+
+    socket.destroy();
+  });
+
+  socket.on("error", (err) => {
+    console.error("[tcp-test] google.com:443 -> ERROR:", err.message);
+
+    socket.destroy();
+  });
+}
+
+/* =========================================================
+   MONGODB DNS + TCP DIAGNOSTIC
 ========================================================= */
 
 async function testMongoNetwork() {
@@ -203,10 +244,16 @@ app.listen(port, "0.0.0.0", async () => {
     `[server] Crystal Express API running on port ${port} (${process.env.NODE_ENV || "production"})`,
   );
 
-  /* Temporary MongoDB network test */
+  /* Test normal outbound TCP */
+  testGoogleTCP();
+
+  /* Test GoDaddy public IP */
+  testOutboundIP();
+
+  /* Test MongoDB DNS + TCP */
   testMongoNetwork();
 
-  /* MongoDB connection */
+  /* Connect to MongoDB */
   try {
     await connectDB();
   } catch (err) {
