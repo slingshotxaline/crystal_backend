@@ -94,13 +94,9 @@ app.get("/api/health", (req, res) => {
 ========================================================= */
 
 app.use("/api/auth", authRoutes);
-
 app.use("/api/users", userRoutes);
-
 app.use("/api/quotes", quoteRoutes);
-
 app.use("/api/enquiries", enquiryRoutes);
-
 app.use("/api/cms", cmsRoutes);
 
 /* =========================================================
@@ -108,7 +104,6 @@ app.use("/api/cms", cmsRoutes);
 ========================================================= */
 
 app.use(notFound);
-
 app.use(errorHandler);
 
 /* =========================================================
@@ -135,8 +130,7 @@ function testOutboundIP() {
 
 /* =========================================================
    GENERAL OUTBOUND TCP TEST
-   Tests whether Node.js can make a normal
-   outbound TCP connection.
+   Tests normal outbound TCP connectivity.
 ========================================================= */
 
 function testGoogleTCP() {
@@ -234,30 +228,42 @@ async function testMongoNetwork() {
 }
 
 /* =========================================================
-   SERVER
+   SERVER START
 ========================================================= */
 
 const port = process.env.PORT || 3000;
+
+console.log("[server] PORT environment variable:", process.env.PORT);
+
+console.log("[server] Using port:", port);
 
 app.listen(port, "0.0.0.0", async () => {
   console.log(
     `[server] Crystal Express API running on port ${port} (${process.env.NODE_ENV || "production"})`,
   );
 
-  /* Test normal outbound TCP */
+  /* Normal Internet TCP test */
   testGoogleTCP();
 
-  /* Test GoDaddy public IP */
+  /* GoDaddy public IP */
   testOutboundIP();
 
-  /* Test MongoDB DNS + TCP */
+  /* MongoDB DNS + TCP diagnostics */
   testMongoNetwork();
 
-  /* Connect to MongoDB */
+  /* MongoDB connection */
   try {
-    await connectDB();
+    const connected = await connectDB();
+
+    if (connected === false) {
+      console.error("[server] Starting without MongoDB connection.");
+    } else {
+      console.log("[server] Database initialization completed.");
+    }
   } catch (err) {
     console.error("[server] Database connection failed:", err.message);
+
+    console.error("[server] API server will remain online.");
   }
 });
 
